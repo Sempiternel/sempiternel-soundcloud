@@ -7,11 +7,11 @@ dayjs.extend(relativeTime);
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('queue')
-		.setDescription('Show video queue.')
+		.setDescription('Show track queue.')
 		.addIntegerOption(option => option.setName('page').setDescription('The queue page.')),
 	async execute(interaction) {
 		if (!interaction.inGuild()) return interaction.reply({ content: 'You must be on a server to run this command.', ephemeral: true });
-		if (!interaction.guild.music) return interaction.reply({ content: 'No video is playing.', ephemeral: true });
+		if (!interaction.guild.music) return interaction.reply({ content: 'No track is playing.', ephemeral: true });
 		const embed = new MessageEmbed();
 		const current = interaction.guild.music.current;
 		embed.addField('Now Playing', `[${current.title}](${current.url}) \`${dayjs().second(current.duration).fromNow(true)}\``);

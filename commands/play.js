@@ -1,5 +1,4 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
-const { getBasicInfo, chooseFormat, validateURL, getInfo } = require('ytdl-core');
 const {
 	AudioPlayerStatus,
 	StreamType,
@@ -8,21 +7,24 @@ const {
 	joinVoiceChannel,
 	VoiceConnectionStatus,
 } = require('@discordjs/voice');
-const ytsr = require('ytsr');
 const { MessageActionRow, MessageButton, MessageEmbed, Permissions } = require('discord.js');
-const ytpl = require('ytpl');
 const { FFmpeg, opus } = require('prism-media');
+const scdl = require('soundcloud-downloader').create({ saveClientID: true });
+const miniget = require('miniget');
 
 const play = async guild => {
 	guild.music.current = guild.music.queue.shift();
-	const info = await getInfo(guild.music.current.url);
-	const format = chooseFormat(info.formats, { quality: 'highestaudio' });
+	const info = await scdl.getInfo(guild.music.current.url);
+	const url = new URL(info.media.transcodings[0].url);
+	url.searchParams.set('client_id', await scdl.getClientID());
+	const body = await miniget(url.toString()).text();
+	const media = JSON.parse(body);
 	let options = [
 		'-reconnect', '1',
 		'-reconnect_streamed', '1',
 		'-reconnect_delay_max', '5',
 		'-ss', 0,
-		'-i', format.url,
+		'-i', media.url,
 		'-analyzeduration', '0',
 		'-loglevel', '0',
 		'-f', 's16le',
@@ -43,60 +45,41 @@ const play = async guild => {
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('play')
-		.setDescription('Play a video on YouTube.')
-		.addStringOption(option => option.setName('input').setDescription('The video to search on Youtube.').setRequired(true)),
+		.setDescription('Play a track on YouTube.')
+		.addStringOption(option => option.setName('input').setDescription('The track to search on Youtube.').setRequired(true)),
 	async execute(interaction) {
 		if (!interaction.inGuild()) return interaction.reply({ content: 'You must be on a server to run this command.', ephemeral: true });
 		await interaction.deferReply();
 
-		let value = interaction.options.getString('input', true);
-		const videos = [];
+		const value = interaction.options.getString('input', true);
+		const tracks = [];
 		const row = new MessageActionRow();
 		const embed = new MessageEmbed();
 
-		if (ytpl.validateID(value)) {
-			let playlist = await ytpl(value, { pages: 1 });
-			row.addComponents(new MessageButton().setLabel('Playlist').setStyle('LINK').setURL(playlist.url));
-			if (playlist.author) row.addComponents(new MessageButton().setLabel('Channel').setStyle('LINK').setURL(playlist.author.url));
-			embed.setDescription(playlist.title)
-				.setImage(playlist.thumbnails.reduce((a, b) => (a.width > b.width ? a : b)).url);
-			for (const item of playlist.items) if (item.isPlayable) videos.push({ title: item.title, url: item.url, duration: item.durationSec });
-			while (playlist.continuation) {
-				playlist = await ytpl.continueReq(playlist.continuation);
-				for (const item of playlist.items) if (item.isPlayable) videos.push({ title: item.title, url: item.url, duration: item.durationSec });
-			}
-			embed.addField('Videos', videos.length.toString());
+		if (scdl.isPlaylistURL(value)) {
+			const info = await scdl.getSetInfo(value);
+			row.addComponents(new MessageButton().setLabel('Playlist').setStyle('LINK').setURL(info.permalink_url));
+			row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(info.user.permalink_url));
+			embed.setDescription(info.title).setThumbnail(info.artwork_url);
+			for (const track of info.tracks) if (track.streamable) tracks.push({ title: track.title, url: track.permalink_url, duration: Math.round(track.duration / 1000) });
+			embed.addField('tracks', tracks.length.toString());
 		}
-
-		if (videos.length == 0) {
-			if (!validateURL(value)) {
-				const filters = await ytsr.getFilters(value);
-				const filter = filters.get('Type').get('Video');
-				const searchResults = await ytsr(filter.url, { limit: 1 });
-				if (searchResults.items.length == 0) return interaction.editReply({ content: 'Could not find the video.', ephemeral: true });
-				value = searchResults.items[0].url;
+		else {
+			let info;
+			if (scdl.isValidUrl(value)) { info = await scdl.getInfo(value); }
+			else {
+				const result = await scdl.search({
+					limit: 1,
+					resourceType: 'tracks',
+					query: value,
+				});
+				if (result.collection.length == 0) return interaction.editReply({ content: 'Could not find the track.', ephemeral: true });
+				info = result.collection[0];
 			}
-			const basicInfo = await getBasicInfo(value);
-			const video = {
-				video_url: basicInfo.videoDetails.video_url,
-				channel_url: basicInfo.videoDetails.author.channel_url,
-				title: basicInfo.videoDetails.title,
-				thumbnail: basicInfo.videoDetails.thumbnails.reduce((a, b) => (a.width > b.width ? a : b)).url,
-				duration: parseInt(basicInfo.videoDetails.lengthSeconds),
-			};
-			videos.push({ title: video.title, url: video.video_url, duration: video.duration });
-			row.addComponents(
-				new MessageButton()
-					.setLabel('Video')
-					.setStyle('LINK')
-					.setURL(video.video_url),
-				new MessageButton()
-					.setLabel('Channel')
-					.setStyle('LINK')
-					.setURL(video.channel_url),
-			);
-			embed.setDescription(video.title)
-				.setImage(video.thumbnail);
+			row.addComponents(new MessageButton().setLabel('Track').setStyle('LINK').setURL(info.permalink_url));
+			row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(info.user.permalink_url));
+			embed.setDescription(info.title).setThumbnail(info.artwork_url);
+			tracks.push({ title: info.title, url: info.permalink_url, duration: Math.round(info.duration / 1000) });
 		}
 
 		if (!interaction.guild.music) interaction.guild.music = {};
@@ -109,7 +92,7 @@ module.exports = {
 		const botVoiceChannel = interaction.guild.me.voice.channel;
 		if (botVoiceChannel && voiceChannel.id != botVoiceChannel.id) return interaction.editReply({ content: 'You must be in the same channel as the bot.', ephemeral: true });
 
-		interaction.guild.music.queue = interaction.guild.music.queue.concat(videos);
+		interaction.guild.music.queue = interaction.guild.music.queue.concat(tracks);
 		if (interaction.guild.music.current) return interaction.editReply({ embeds: [embed], components: [row] });
 
 		const connection = joinVoiceChannel({
