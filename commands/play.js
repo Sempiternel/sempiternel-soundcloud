@@ -11,6 +11,9 @@ const { MessageActionRow, MessageButton, MessageEmbed, Permissions } = require('
 const { FFmpeg, opus } = require('prism-media');
 const scdl = require('soundcloud-downloader').create({ saveClientID: true });
 const miniget = require('miniget');
+const dayjs = require('dayjs');
+const relativeTime = require('dayjs/plugin/relativeTime');
+dayjs.extend(relativeTime);
 
 const play = async guild => {
 	guild.music.current = guild.music.queue.shift();
@@ -62,25 +65,25 @@ module.exports = {
 			row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(info.user.permalink_url));
 			embed.setDescription(info.title).setThumbnail(info.artwork_url);
 			for (const track of info.tracks) if (track.streamable) tracks.push({ title: track.title, url: track.permalink_url, duration: Math.round(track.duration / 1000) });
-			embed.addField('tracks', tracks.length.toString());
+			embed.addField('Tracks', tracks.length.toString());
 		}
 		else {
 			let info;
 			if (scdl.isValidUrl(value)) { info = await scdl.getInfo(value); }
 			else {
 				const result = await scdl.search({
-					limit: 1,
 					resourceType: 'tracks',
 					query: value,
 				});
-				if (result.collection.length == 0) return interaction.editReply({ content: 'Could not find the track.', ephemeral: true });
-				info = result.collection[0];
+				info = result.collection.find(item => item.duration == item.full_duration);
+				if (!info) return interaction.editReply({ content: 'Could not find the track.', ephemeral: true });
 			}
 			row.addComponents(new MessageButton().setLabel('Track').setStyle('LINK').setURL(info.permalink_url));
 			row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(info.user.permalink_url));
 			embed.setDescription(info.title).setThumbnail(info.artwork_url);
 			tracks.push({ title: info.title, url: info.permalink_url, duration: Math.round(info.duration / 1000) });
 		}
+		embed.addField('Duration', dayjs().second(tracks.reduce((previous, item) => previous + item.duration, 0)).fromNow(true));
 
 		if (!interaction.guild.music) interaction.guild.music = {};
 		if (!interaction.guild.music.queue) interaction.guild.music.queue = [];
