@@ -1,6 +1,6 @@
 const fs = require('fs');
 const { Client, Collection, Intents } = require('discord.js');
-const { token } = require('./config.json');
+const { DISCORD_TOKEN } = process.env;
 const winston = require('winston');
 
 const client = new Client({
@@ -56,4 +56,4 @@ process.on('SIGINT', () => process.exit());
 process.on('SIGUSR1', () => process.exit());
 process.on('SIGUSR2', () => process.exit());
 
-client.login(token);
+client.login(DISCORD_TOKEN);

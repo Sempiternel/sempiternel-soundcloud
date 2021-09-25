@@ -64,7 +64,12 @@ module.exports = {
 			row.addComponents(new MessageButton().setLabel('Playlist').setStyle('LINK').setURL(info.permalink_url));
 			row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(info.user.permalink_url));
 			embed.setDescription(info.title).setThumbnail(info.artwork_url);
-			for (const track of info.tracks) if (track.streamable) tracks.push({ title: track.title, url: track.permalink_url, duration: Math.round(track.duration / 1000) });
+			for (const track of info.tracks) {
+				if (track.streamable) {
+					const artist = info.publisher_metadata && info.publisher_metadata.artist;
+					tracks.push({ title: track.title, url: track.permalink_url, duration: Math.round(track.duration / 1000), artist });
+				}
+			}
 			embed.addField('Tracks', tracks.length.toString());
 		}
 		else {
@@ -81,7 +86,8 @@ module.exports = {
 			row.addComponents(new MessageButton().setLabel('Track').setStyle('LINK').setURL(info.permalink_url));
 			row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(info.user.permalink_url));
 			embed.setDescription(info.title).setThumbnail(info.artwork_url);
-			tracks.push({ title: info.title, url: info.permalink_url, duration: Math.round(info.duration / 1000) });
+			const artist = info.publisher_metadata && info.publisher_metadata.artist;
+			tracks.push({ title: info.title, url: info.permalink_url, duration: Math.round(info.duration / 1000), artist });
 		}
 		embed.addField('Duration', dayjs().second(tracks.reduce((previous, item) => previous + item.duration, 0)).fromNow(true));
 
