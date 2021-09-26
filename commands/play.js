@@ -18,7 +18,6 @@ const spotify = require('spotify-url-info');
 
 const play = async guild => {
 	guild.music.current = guild.music.queue.shift();
-	let url = guild.music.current.url;
 
 	if (!scdl.isValidUrl(guild.music.current.url)) {
 		const result = await scdl.search({
@@ -26,10 +25,11 @@ const play = async guild => {
 			query: `${guild.music.current.artist} - ${guild.music.current.title}`,
 		});
 		const info = result.collection.find(item => item.duration == item.full_duration);
-		url = info.permalink_url;
+		const artist = info.publisher_metadata && info.publisher_metadata.artist;
+		guild.music.current = { title: info.title, url: info.permalink_url, duration: Math.round(info.duration / 1000), artist };
 	}
 
-	const info = await scdl.getInfo(url);
+	const info = await scdl.getInfo(guild.music.current.url);
 	const mediaUrl = new URL(info.media.transcodings[0].url);
 	mediaUrl.searchParams.set('client_id', await scdl.getClientID());
 	const body = await miniget(mediaUrl.toString()).text();
@@ -39,7 +39,6 @@ const play = async guild => {
 		'-reconnect', '1',
 		'-reconnect_streamed', '1',
 		'-reconnect_delay_max', '5',
-		'-ss', 0,
 		'-i', media.url,
 		'-analyzeduration', '0',
 		'-loglevel', '0',
