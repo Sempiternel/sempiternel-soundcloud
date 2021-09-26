@@ -16,10 +16,6 @@ module.exports = {
 				const embeds = lyricsArray.map(data => new MessageEmbed().setDescription(data));
 				interaction.reply({ embeds: [embeds.shift()] });
 				for (const embed of embeds) interaction.followUp({ embeds: [embed] });
-			})
-			.catch(error => {
-				console.log(error);
-				interaction.reply({ content: 'Could not find the lyrics.', ephemeral: true });
-			});
+			}).catch(() => interaction.reply({ content: 'Could not find the lyrics.', ephemeral: true }));
 	},
 };

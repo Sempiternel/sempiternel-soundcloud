@@ -14,14 +14,27 @@ const miniget = require('miniget');
 const dayjs = require('dayjs');
 const relativeTime = require('dayjs/plugin/relativeTime');
 dayjs.extend(relativeTime);
+const spotify = require('spotify-url-info');
 
 const play = async guild => {
 	guild.music.current = guild.music.queue.shift();
-	const info = await scdl.getInfo(guild.music.current.url);
-	const url = new URL(info.media.transcodings[0].url);
-	url.searchParams.set('client_id', await scdl.getClientID());
-	const body = await miniget(url.toString()).text();
+	let url = guild.music.current.url;
+
+	if (!scdl.isValidUrl(guild.music.current.url)) {
+		const result = await scdl.search({
+			resourceType: 'tracks',
+			query: `${guild.music.current.artist} - ${guild.music.current.title}`,
+		});
+		const info = result.collection.find(item => item.duration == item.full_duration);
+		url = info.permalink_url;
+	}
+
+	const info = await scdl.getInfo(url);
+	const mediaUrl = new URL(info.media.transcodings[0].url);
+	mediaUrl.searchParams.set('client_id', await scdl.getClientID());
+	const body = await miniget(mediaUrl.toString()).text();
 	const media = JSON.parse(body);
+
 	let options = [
 		'-reconnect', '1',
 		'-reconnect_streamed', '1',
@@ -40,6 +53,7 @@ const play = async guild => {
 	const stream = transcoder.pipe(new opus.Encoder({ rate: 48000, channels: 2, frameSize: 48 * 20 }));
 	const resource = createAudioResource(stream, { inputType: StreamType.Opus });
 	guild.music.player.play(resource);
+
 	let nick = guild.music.current.title;
 	if (nick.length > 32) nick = nick.substring(0, 32);
 	if (guild.me.permissions.has(Permissions.FLAGS.CHANGE_NICKNAME)) guild.me.setNickname(nick);
@@ -59,37 +73,70 @@ module.exports = {
 		const row = new MessageActionRow();
 		const embed = new MessageEmbed();
 
-		if (scdl.isPlaylistURL(value)) {
-			const info = await scdl.getSetInfo(value);
-			row.addComponents(new MessageButton().setLabel('Playlist').setStyle('LINK').setURL(info.permalink_url));
-			row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(info.user.permalink_url));
-			embed.setDescription(info.title).setThumbnail(info.artwork_url);
-			for (const track of info.tracks) {
-				if (track.streamable) {
-					const artist = info.publisher_metadata && info.publisher_metadata.artist;
-					tracks.push({ title: track.title, url: track.permalink_url, duration: Math.round(track.duration / 1000), artist });
+		try {
+			const data = await spotify.getData(value);
+			let spotifyTracks;
+			if (!data.tracks) {
+				row.addComponents(new MessageButton().setLabel('Track').setStyle('LINK').setURL(data.external_urls.spotify));
+				row.addComponents(new MessageButton().setLabel('Artist').setStyle('LINK').setURL(data.artists[0].external_urls.spotify));
+				embed.setDescription(data.name).setThumbnail(data.album.images.reduce((a, b) => (a.width > b.width ? a : b)).url);
+				spotifyTracks = [data];
+			}
+			else if (data.tracks.items) {
+				if (data.tracks.items[0].track) {
+					row.addComponents(new MessageButton().setLabel('Playlist').setStyle('LINK').setURL(data.external_urls.spotify));
+					row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(data.owner.external_urls.spotify));
+					embed.setDescription(data.name).setThumbnail(data.images.reduce((a, b) => (a.width > b.width ? a : b)).url);
+					spotifyTracks = data.tracks.items.map(t => t.track);
+				}
+				else {
+					row.addComponents(new MessageButton().setLabel('Album').setStyle('LINK').setURL(data.external_urls.spotify));
+					row.addComponents(new MessageButton().setLabel('Artist').setStyle('LINK').setURL(data.artists[0].external_urls.spotify));
+					embed.setDescription(data.name).setThumbnail(data.images.reduce((a, b) => (a.width > b.width ? a : b)).url);
+					spotifyTracks = data.tracks.items;
 				}
 			}
-			embed.addField('Tracks', tracks.length.toString());
-		}
-		else {
-			let info;
-			if (scdl.isValidUrl(value)) { info = await scdl.getInfo(value); }
 			else {
-				const result = await scdl.search({
-					resourceType: 'tracks',
-					query: value,
-				});
-				info = result.collection.find(item => item.duration == item.full_duration);
-				if (!info) return interaction.editReply({ content: 'Could not find the track.', ephemeral: true });
+				row.addComponents(new MessageButton().setLabel('Artist').setStyle('LINK').setURL(data.external_urls.spotify));
+				embed.setDescription(data.name).setThumbnail(data.images.reduce((a, b) => (a.width > b.width ? a : b)).url);
+				spotifyTracks = data.tracks;
 			}
-			row.addComponents(new MessageButton().setLabel('Track').setStyle('LINK').setURL(info.permalink_url));
-			row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(info.user.permalink_url));
-			embed.setDescription(info.title).setThumbnail(info.artwork_url);
-			const artist = info.publisher_metadata && info.publisher_metadata.artist;
-			tracks.push({ title: info.title, url: info.permalink_url, duration: Math.round(info.duration / 1000), artist });
+			for (const track of spotifyTracks) tracks.push({ title: track.name, url: track.external_urls.spotify, duration: Math.round(track.duration_ms / 1000), artist: track.artists[0].name });
 		}
-		embed.addField('Duration', dayjs().second(tracks.reduce((previous, item) => previous + item.duration, 0)).fromNow(true));
+		catch (error) {
+			console.error(error);
+			if (scdl.isPlaylistURL(value)) {
+				const info = await scdl.getSetInfo(value);
+				row.addComponents(new MessageButton().setLabel('Playlist').setStyle('LINK').setURL(info.permalink_url));
+				row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(info.user.permalink_url));
+				embed.setDescription(info.title).setThumbnail(info.artwork_url);
+				for (const track of info.tracks) {
+					if (track.streamable) {
+						const artist = info.publisher_metadata && info.publisher_metadata.artist;
+						tracks.push({ title: track.title, url: track.permalink_url, duration: Math.round(track.duration / 1000), artist });
+					}
+				}
+			}
+			else {
+				let info;
+				if (scdl.isValidUrl(value)) { info = await scdl.getInfo(value); }
+				else {
+					const result = await scdl.search({
+						resourceType: 'tracks',
+						query: value,
+					});
+					info = result.collection.find(item => item.duration == item.full_duration);
+					if (!info) return interaction.editReply({ content: 'Could not find the track.', ephemeral: true });
+				}
+				row.addComponents(new MessageButton().setLabel('Track').setStyle('LINK').setURL(info.permalink_url));
+				row.addComponents(new MessageButton().setLabel('User').setStyle('LINK').setURL(info.user.permalink_url));
+				embed.setDescription(info.title).setThumbnail(info.artwork_url);
+				const artist = info.publisher_metadata && info.publisher_metadata.artist;
+				tracks.push({ title: info.title, url: info.permalink_url, duration: Math.round(info.duration / 1000), artist });
+			}
+		}
+		if (tracks.length > 1) embed.addField('Tracks', tracks.length.toString(), true);
+		embed.addField('Duration', dayjs().second(tracks.reduce((previous, item) => previous + item.duration, 0)).fromNow(true), true);
 
 		if (!interaction.guild.music) interaction.guild.music = {};
 		if (!interaction.guild.music.queue) interaction.guild.music.queue = [];
@@ -123,6 +170,6 @@ module.exports = {
 		});
 		play(interaction.guild);
 
-		return interaction.editReply({ embeds: [embed.setTitle('Music playing')], components: [row] });
+		interaction.editReply({ embeds: [embed.setTitle('Music playing')], components: [row] });
 	},
 };

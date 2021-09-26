@@ -1,6 +1,6 @@
 module.exports = {
 	apps: [{
-		name: 'sempiternel-youtube',
+		name: 'sempiternel-soundcloud',
 		script: './index.js',
 		exec_mode: 'cluster',
 	}],
